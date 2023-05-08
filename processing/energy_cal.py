@@ -14,6 +14,9 @@ from scipy.optimize import curve_fit
 import tinydb as db
 from tinydb.storages import MemoryStorage
 
+import matplotlib as mpl
+mpl.use('Agg')
+
 import matplotlib
 # if os.environ.get('HOSTNAME'): # cenpa-rocks
 #     matplotlib.use('Agg')
@@ -26,13 +29,13 @@ with warnings.catch_warnings():
     from tqdm import tqdm
     tqdm.pandas()
 
-from pygama import DataGroup
-from pygama.io.orcadaq import parse_header
-import pygama.lh5 as lh5
-import pygama.analysis.metadata as pmd
-import pygama.analysis.histograms as pgh
-import pygama.analysis.calibration as pgc
-import pygama.analysis.peak_fitting as pgf
+from pygama.flow import DataGroup
+from orca_utils import parse_header
+from pygama.lgdo import lh5_store as lh5
+from orca_utils import write_pretty
+import pygama.math.histogram as pgh
+import pygama.pargen.energy_cal as pgc
+import pygama.math.peak_fitting as pgf
 
 def main():
     doc="""
@@ -249,7 +252,7 @@ def init_ecaldb(config):
 
     # pretty-print the JSON database to file
     raw_db = db_ecal.storage.read()
-    pmd.write_pretty(raw_db, f_db)
+    write_pretty(raw_db, f_db)
 
     # show the file as-is on disk
     with open(f_db) as f:
@@ -315,7 +318,7 @@ def check_raw_spectrum(dg, config, db_ecal):
     """
     # load energy data
     dsp_list = config['lh5_dir'] + dg.fileDB['dsp_path'] + '/' + dg.fileDB['dsp_file']
-    raw_data = lh5.load_nda(dsp_list, config['rawe'], config['input_table'], verbose=False)
+    raw_data = lh5.load_nda(dsp_list, config['rawe'], config['input_table'])
     runtime_min = dg.fileDB['runtime'].sum()
 
     print('\nShowing raw spectra ...')
@@ -440,7 +443,7 @@ def run_peakdet(dg, config, db_ecal):
     # show in-memory state and then write to file
     # pprint(db_ecal.storage.read())
     print('Writing results to ecalDB.')
-    pmd.write_pretty(db_ecal.storage.read(), config['ecaldb'])
+    write_pretty(db_ecal.storage.read(), config['ecaldb'])
 
 
 def peakdet_auto(df_group, config):
@@ -451,12 +454,15 @@ def peakdet_auto(df_group, config):
     """
     # load data and compute runtime
     dsp_list = config['lh5_dir'] + df_group['dsp_path'] + '/' + df_group['dsp_file']
-    edata = lh5.load_nda(dsp_list, config['rawe'], config['input_table'], verbose=False)
+    edata = lh5.load_nda(dsp_list, config['rawe'], config['input_table'])
     runtime_min = df_group['runtime'].sum()
     run = df_group.run.iloc[0]
     cyclo, cychi = df_group.cycle.iloc[0], df_group.cycle.iloc[-1]
     print(f'  Runtime: {runtime_min:.1f} min.  Calibrating:', [f'{et}:{len(ev)} events' for et, ev in edata.items()])
 
+    print('dsp list: ', str(dsp_list))
+    print(edata)
+    
     # loop over energy estimators of interest
     pd_results = {}
     for et in config['rawe']:
@@ -473,12 +479,18 @@ def peakdet_auto(df_group, config):
         ctr_bins = (bins[:-1] + bins[1:]) / 2.
         idx = np.where(ctr_bins > lowe_cut)
 
-        maxes, mins = pgc.peakdet(hist_norm[idx], pd_thresh, ctr_bins[idx])
+        print(idx)
+        print(np.where(hist > 0))
+        maxes, mins = pgc.get_i_local_extrema(hist_norm[idx], pd_thresh)#, ctr_bins[idx])
         # maxes, mins = pgc.peakdet(hist_deriv[idx], pd_thresh, ctr_bins[idx])
         if len(maxes)==0:
             print('warning, no maxima!  adjust peakdet threshold')
         # print(maxes) # x (energy) [:,0], y (counts) [:,1]
 
+        maxes = [(ctr_bins[idx][i], hist_norm[idx][i]) for i in maxes]
+        maxes = np.asarray(maxes)
+        print(maxes)
+        
         # run peak matching
         exp_pks = config['expected_peaks']
         tst_pks = config['test_peaks']
@@ -495,6 +507,9 @@ def peakdet_auto(df_group, config):
             imaxes = [np.where(np.isclose(ctr_bins, x[0]))[0][0] for x in maxes]
             imaxes = np.asarray(imaxes)
 
+            #imaxes = [np.where(np.isclose(ctr_bins, ctr_bins[idx][i]))[0][0] for i in maxes]
+            #imaxes = np.asarray(imaxes)
+            
             # energy, uncalibrated
             p0.semilogy(bins[imaxes], hist_norm[imaxes], '.m')
             p0.semilogy(bins[idx], hist_norm[idx], ds='steps', c='b', lw=1, label=et)
@@ -682,7 +697,7 @@ def peakdet_input(df_group, config):
     """
     # load data and compute runtime
     dsp_list = config['lh5_dir'] + df_group['dsp_path'] + '/' + df_group['dsp_file']
-    edata = lh5.load_nda(dsp_list, config['rawe'], config['input_table'], verbose=False)
+    edata = lh5.load_nda(dsp_list, config['rawe'], config['input_table'])
     runtime_min = df_group['runtime'].sum()
     run = int(df_group.run.iloc[0])
     cyclo, cychi = df_group.cycle.iloc[0], df_group.cycle.iloc[-1]
@@ -840,7 +855,7 @@ def run_peakfit(dg, config, db_ecal):
     # show in-memory state and then write to file
     # pprint(db_ecal.storage.read())
     print('Writing results to ecalDB.')
-    pmd.write_pretty(db_ecal.storage.read(), config['ecaldb'])
+    write_pretty(db_ecal.storage.read(), config['ecaldb'])
 
 
 def peakfit(df_group, config, db_ecal):
@@ -848,6 +863,7 @@ def peakfit(df_group, config, db_ecal):
     Example:
     $ ./energy_cal.py -q 'run==117' -pf [-pi 002 : use peakinput] [-p : show plot]
     """
+    # print('Calling peakfit: ', df_group, config, db_ecal)
     # choose the mode of peakdet to look up constants from
     if 'input_id' in config.keys():
         pol = config['pol'][0]
@@ -868,7 +884,7 @@ def peakfit(df_group, config, db_ecal):
 
     # load data and compute runtime
     dsp_list = config['lh5_dir'] + df_group['dsp_path'] + '/' + df_group['dsp_file']
-    raw_data = lh5.load_nda(dsp_list, config['rawe'], config['input_table'], verbose=False)
+    raw_data = lh5.load_nda(dsp_list, config['rawe'], config['input_table'])
     runtime_min = df_group['runtime'].sum()
     print(f'  Runtime: {runtime_min:.1f} min.  Calibrating:', [f'{et}:{len(ev)} events' for et, ev in raw_data.items()])
     print(f'  Fitting to:', config['fit_func'])
@@ -910,52 +926,59 @@ def peakfit(df_group, config, db_ecal):
 
         # 1. use first guess to float peak positions, and compute new initial
         # guesses for the locations of the raw peaks
+        print('FIRST PASS: ')
         f1 = fit_peaks(epeaks, cal_pars_init, raw_data[et], runtime_min,
                        ff_name = config['fit_func'], show_plot = False,
                        batch = config['batch_mode'])
         df_fits = pd.DataFrame(f1).T
-        print(df_fits)
+        # print(df_fits)
 
-        pfit, pcov = np.polyfit(df_fits['mu_raw'], df_fits['epk'], config['pol'][0], cov=True)
+        
+        pfit, pcov = np.polyfit(np.array(df_fits['mu_raw'], dtype=float), np.array(df_fits['epk'], dtype=float), config['pol'][0], cov=True)
         perr = np.sqrt(np.diag(pcov))
 
-        # print("part 1 constants ", pfit)
-        # print("part 1 dataframe:")
-        # print(df_fits)
+        print("part 1 constants ", pfit)
+        print("part 1 dataframe:")
+        print(df_fits)
 
         # 2. the new guess of the raw peak location might still be wrong.
         # so float peak positions a second time, using a calibration constant
         # of unity.  this should give a polynomial which can be used to
         # correct the first one.
-        f2 = fit_peaks(df_fits['mu_raw'], [0, 1, 0], raw_data[et], runtime_min,
+        print('SECOND PASS')
+        f2 = fit_peaks(df_fits['mu'], pfit, raw_data[et], runtime_min,
                        range = config['init_vals'][et]['raw_range'],
                        ff_name = config['fit_func'], show_plot = False,
                        batch = config['batch_mode'])
         df2 = pd.DataFrame(f2).T
-        pfit, pcov = np.polyfit(df2['epk'], df2['mu'], config['pol'][0], cov=True)
+        pfit, pcov = np.polyfit(np.array(df2['mu_raw'], dtype=float), np.array(df2['epk'], dtype=float), config['pol'][0], cov=True)
         pfunc = np.poly1d(pfit)
         df2['mu_new'] = pfunc(df2['mu_raw'])
+        
 
-        # print("part 2 constants:", pfit)
-        # print("part 2 dataframe:")
-        # print(df2)
+        print("part 2 constants:", pfit)
+        print("part 2 dataframe:")
+        print(df2)
         # exit()
 
         # 3. using the final "best guess" locations of the raw peaks,
         # compute the final calibration curve, and float the peaks again
         # to save results on the FWHM's, etc.
 
-        pfit, pcov = np.polyfit(df2['mu_new'], df_fits['epk'], config['pol'][0], cov=True)
+        # pfit, pcov = np.polyfit(df2['mu_new'], df_fits['epk'], config['pol'][0], cov=True)
+        #pfit, pcov = np.polyfit(np.array(df2['mu_new'], dtype=float), np.array(df2['epk'], dtype=float), config['pol'][0], cov=True)
+
+        print('THIRD PASS')
         f3 = fit_peaks(epeaks, pfit, raw_data[et], runtime_min,
                        ff_name = config['fit_func'], show_plot = False,
                        batch = config['batch_mode'])
         df_fit3 = pd.DataFrame(f3).T
-        pfit, pcov = np.polyfit(df_fit3['mu_raw'], df_fits['epk'], config['pol'][0], cov=True)
+        pfit, pcov = np.polyfit(np.array(df_fit3['mu_raw'], dtype=float), np.array(df_fit3['epk'], dtype=float), config['pol'][0], cov=True)
 
-        # print("part 3 constants:", pfit)
-        # print("part 3 dataframe:")
-        print(df_fits)
+        print("part 3 constants:", pfit)
+        print("part 3 dataframe:")
         df_fits = df_fit3
+        print(df_fits)
         p_err_cal = np.sqrt(np.diag(pcov))
 
         # ---- end calibration curve calculation ----
@@ -969,7 +992,7 @@ def peakfit(df_group, config, db_ecal):
 
         cp = [f'p{i} {cp:.4e} ' for i, cp in enumerate(pfit[::-1])]
         print(f'  Peakfit outputs:', ' '.join(cp))
-        print(df_fits)
+        # print(df_fits)
         # exit()
 
         # TODO: save this output to a SEPARATE output file (don't muck up pf_results,
@@ -983,7 +1006,7 @@ def peakfit(df_group, config, db_ecal):
         def sqrt_fwhm(x, a_n, a_f, a_c):
             return np.sqrt(a_n**2 + a_f**2 * x + a_c**2 * x**2)
         p_guess = [0.3, 0.05, 0.001]
-        sig_fit, p_cov = curve_fit(sqrt_fwhm, df_fits['mu'], df_fits['fwhm'],
+        sig_fit, p_cov = curve_fit(sqrt_fwhm, np.array(df_fits['mu']), np.array(df_fits['fwhm']),
                                  p0=p_guess)#, sigma = np.sqrt(h), absolute_sigma=True)
         p_err = np.sqrt(np.diag(p_cov))
 
@@ -1121,14 +1144,17 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
         else:
             plt.show()
         plt.cla()
+        plt.close()
 
     # loop over peak energies
     fit_results = {}
     for ie, epk in enumerate(epeaks):
+        # print('peak: ', epk)
 
         # adjust the window.  resolution goes as roughly sqrt(energy)
-        window = np.sqrt(epk)*(1+(epk-200)/epk)
-        # window = np.sqrt(epk)*1.8
+        # window = np.sqrt(epk)*(1+(epk-200)/epk)
+        window = np.sqrt(epk)*1.8
+        # print('window: ', window)
         xlo, xhi = epk - window / 2, epk + window / 2
         nbins = int(window * 5/np.sqrt(np.sqrt(epk)))  # todo, make this get smaller w/ inc energy
         xpb = (xhi - xlo) / nbins
@@ -1142,6 +1168,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
         hist_norm = np.divide(hist, runtime_min * 60)
         hist_var = np.array([np.sqrt(h / (runtime_min * 60)) for h in hist])
 
+        
         # estimate left and right sideband locations
         ibkg_lo, ibkg_hi = int(nbins * 0.2), int(nbins * 0.8)
         bkg0 = np.mean(hist_norm[ :ibkg_lo])
@@ -1151,7 +1178,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
         # default: gaussian fit + step function : a, mu, sigma, bkg, step
         if ff_name == 'gauss_step':
 
-            fit_func = pgf.gauss_step
+            fit_func = pgf.gauss_step_pdf
 
             # set robust initial guesses
             step0 = bkg0 - bkg0_hi
@@ -1159,7 +1186,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
             ix_upr = np.where((b > b[imax]) & (h <= np.amax(h)/2))
             ix_bot = np.where((b < b[imax]) & (h <= np.amax(h)/2))
 
-            if show_plot:
+            # if show_plot:
                 # print(b[imax], np.amax(h)/2)
                 # print(b.shape, h.shape)
                 # print('ix_upr', ix_upr)
@@ -1167,10 +1194,10 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
                 # print('b[ix_upr]', b[ix_upr])
                 # print('ix_bot', ix_bot)
                 # print('LEN IXBOT', len(ix_bot[0]))
-                plt.close()
-                plt.plot(b, h, c='b', ds='steps', lw=2)
-                plt.xlabel('pass-1 energy (kev)', ha='right', x=1)
-                plt.show()
+                # plt.close()
+                # plt.plot(b, h, c='b', ds='steps', lw=2)
+                # plt.xlabel('pass-1 energy (kev)', ha='right', x=1)
+                # plt.show()
 
             if len(ix_upr[0]) == 0 or len(ix_bot[0]) == 0:
                 print("Error, couldn't set intitial guesses for peak. Maybe check your input calibration constants and set show_plot=True")
@@ -1227,7 +1254,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
                 }
 
         # compute goodness of fit
-        rchisq = pgf.goodness_of_fit(hist_norm, b, fit_func, p_fit)
+        rchisq = pgf.goodness_of_fit(hist_norm, bins, hist_var, fit_func, p_fit)
         fit_results[ie]['rchisq'] = rchisq
 
         # Now we can invert the given set of input calibration constants,
@@ -1253,6 +1280,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
         # print(mu_raw, mu_unc)
 
         if show_plot:
+            fig, ax = plt.subplots()
             xfit = np.arange(xlo, xhi, xpb * 0.1)
             plt.axvline(bins[ibkg_lo], c='m', label='bkg region')
             plt.plot(xfit, fit_func(xfit, *p_init), '-', c='orange', label='init')
@@ -1261,6 +1289,7 @@ def fit_peaks(epeaks, cal_pars, raw_data, runtime_min, range=[0, 3000, 5], ff_na
             plt.plot(np.nan, np.nan, 'w', label=f'FWHM: {fwhm:.2f}')
             plt.xlabel('pass-1 energy (kev)', ha='right', x=1)
             plt.legend(fontsize=12)
+            plt.title(f'Fit results for {epk} keV peak')
             if batch:
                 plt.savefig(f'./plots/energy_cal/fit{ie}_peakfit.png')
             else:
