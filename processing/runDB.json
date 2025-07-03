@@ -581,5 +581,13 @@
     "554":["4988-5013", "alp", "elog 476, Al pad, lin 8"],
     "555":["5014-5028", "alp", "elog 476, Al pad, lin 10"],
     "556":["5029-5041", "alp", "elog 476, Al pad, lin 12"],
-    "557":["5042-5074", "bkg", "elog 476, Al pad, lin 12"]
+    "557":["5042-5074", "bkg", "elog 476, Al pad, lin 12"],
+
+    "558":["5075-5078", "bkg", "elog 485, Copper can, lin 0"],
+    "559":["5079-5080", "bkg", "elog 485, Copper can, lin 1"],
+    "560":["5081-5084", "bkg", "elog 485, Copper can, lin 2"],
+    "561":["5085-5088", "bkg", "elog 485, Copper can, lin 3"],
+    "562":["5089-5093", "bkg", "elog 485, Copper can, lin 2"],
+    "563":["5094-5097", "bkg", "elog 485, Copper can, lin 1"],
+    "564":["5098-5102", "bkg", "elog 485, Copper can, lin 0"]
 }
