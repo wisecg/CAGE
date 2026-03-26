@@ -1,5 +1,8 @@
 # New additions go at the top!
 *.vscode*
+processing/metadata/dsp/dsp_cyc*.json
+processing/logs/*
+.vscode
 new_sims/submission/sub_*
 new_sims/submission/run_*
 config.json

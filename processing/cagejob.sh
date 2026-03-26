@@ -1,14 +1,17 @@
 #!/bin/bash
-#SBATCH --qos=shared
-#SBATCH --time=12:00:00
-#SBATCH --constraint=haswell
-#SBATCH --account=m2676
+#SBATCH -N 1
+#SBATCH -C cpu
+#SBATCH -c 1
+#SBATCH -q shared
+#SBATCH -J cage_job
+#SBATCH -t 12:00:00
+#SBATCH -A m2676
 #SBATCH --export=HDF5_USE_FILE_LOCKING=FALSE
 #SBATCH --image=legendexp/legend-base:latest
-#SBATCH --chdir=/global/project/projectdirs/legend/software/CAGE/processing
-#SBATCH --output=/global/project/projectdirs/legend/software/CAGE/processing/logs/cori-%j.txt
+#SBATCH --chdir=/global/cfs/projectdirs/legend/software/CAGE/processing
+#SBATCH --output=/global/cfs/projectdirs/legend/software/CAGE/processing/logs/pmut-%j.txt
 #SBATCH --mail-type=begin,end,fail
-#SBATCH --mail-user=wisecg@uw.edu
+#SBATCH --mail-user=grsong@uw.edu
 
 echo "Job Start:"
 date
@@ -28,7 +31,7 @@ fi
 # NOTE: you need to update runDB.json before running this!
 # shifter python setup.py --update --orca -b
 
-shifter python processing.py -q 'run >= 428' --d2r
+# shifter python processing.py -q 'run >= 428' --d2r
 
 # shifter python processing.py -q 'run >= 395' --d2r
 
@@ -46,9 +49,29 @@ shifter python processing.py -q 'run >= 428' --d2r
 
 
 # run a bunch of DSP in parallel (lazy method, comment each line in & submit)
-#shifter python processing.py -q 'run >= 305 and run <= 306' --r2d
-#shifter python processing.py -q 'run >= 307 and run <= 313' --r2d
-#shifter python processing.py -q 'run >= 314 and run <= 319' --r2d
+#shifter python processing.py -q 'run == 516' -o --r2d --dsp dsp_cyc4430.json
+#shifter python processing.py -q 'run == 517' -o --r2d --dsp dsp_cyc4442.json
+#shifter python processing.py -q 'run == 518' -o --r2d --dsp dsp_cyc4455.json
+#shifter python processing.py -q 'run == 519' -o --r2d --dsp dsp_cyc4467.json
+#shifter python processing.py -q 'run == 520' -o --r2d --dsp dsp_cyc4489.json
+#shifter python processing.py -q 'run == 521' -o --r2d --dsp dsp_cyc4508.json
+#shifter python processing.py -q 'run == 522' -o --r2d --dsp dsp_cyc4520.json
+#shifter python processing.py -q 'run == 523' -o --r2d --dsp dsp_cyc4531.json
+#shifter python processing.py -q 'run == 524' -o --r2d --dsp dsp_cyc4543.json
+#shifter python processing.py -q 'run == 525' -o --r2d --dsp dsp_cyc4555.json
+#shifter python processing.py -q 'run == 526' -o --r2d --dsp dsp_cyc4566.json
+#shifter python processing.py -q 'run == 527' -o --r2d --dsp dsp_cyc4578.json
+#shifter python processing.py -q 'run == 528' -o --r2d --dsp dsp_cyc4590.json
+#shifter python processing.py -q 'run == 529' -o --r2d --dsp dsp_cyc4604.json
+#shifter python processing.py -q 'run == 530' -o --r2d --dsp dsp_cyc4616.json
+#shifter python processing.py -q 'run == 531' -o --r2d --dsp dsp_cyc4628.json
+#shifter python processing.py -q 'run == 532' -o --r2d --dsp dsp_cyc4640.json
+#shifter python processing.py -q 'run == 533' -o --r2d --dsp dsp_cyc4652.json
+shifter python processing.py -q 'run == 534' -o --r2d --dsp dsp_cyc4688.json
+
+
+#shifter python processing.py -q 'cycle >= 3819 and run <= 471' -o --r2d --dsp dsp_cyc3717.json
+#shifter python processing.py -q 'run == 430' --r2d --dsp dsp_cyc3121.json
 #shifter python processing.py -q 'run == 320' --r2d
 #shifter python processing.py -q 'run >= 321 and run <= 331' --d2r --r2d -o
 #shifter python processing.py -q 'run == 332' --d2r --r2d
